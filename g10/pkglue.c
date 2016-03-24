@@ -47,35 +47,33 @@ get_mpi_from_sexp (gcry_sexp_t sexp, const char *item, int mpifmt)
   return data;
 }
 
-
-
 /****************
- * Emulate our old PK interface here - sometime in the future we might
- * change the internal design to directly fit to libgcrypt.
+ * Patch: blind signature verification
+ *
+ * Extracts the pkey related s_exp creation.
  */
 int
-pk_verify (pubkey_algo_t pkalgo, gcry_mpi_t hash,
-           gcry_mpi_t *data, gcry_mpi_t *pkey)
+make_sexp_from_pkey (gcry_sexp_t *s_pkey, pubkey_algo_t pkalgo,
+                     gcry_mpi_t *pkey)
 {
-  gcry_sexp_t s_sig, s_hash, s_pkey;
   int rc;
 
   /* Make a sexp from pkey.  */
   if (pkalgo == PUBKEY_ALGO_DSA)
     {
-      rc = gcry_sexp_build (&s_pkey, NULL,
+      rc = gcry_sexp_build (s_pkey, NULL,
 			    "(public-key(dsa(p%m)(q%m)(g%m)(y%m)))",
 			    pkey[0], pkey[1], pkey[2], pkey[3]);
     }
   else if (pkalgo == PUBKEY_ALGO_ELGAMAL_E || pkalgo == PUBKEY_ALGO_ELGAMAL)
     {
-      rc = gcry_sexp_build (&s_pkey, NULL,
+      rc = gcry_sexp_build (s_pkey, NULL,
 			    "(public-key(elg(p%m)(g%m)(y%m)))",
 			    pkey[0], pkey[1], pkey[2]);
     }
   else if (pkalgo == PUBKEY_ALGO_RSA || pkalgo == PUBKEY_ALGO_RSA_S)
     {
-      rc = gcry_sexp_build (&s_pkey, NULL,
+      rc = gcry_sexp_build (s_pkey, NULL,
 			    "(public-key(rsa(n%m)(e%m)))", pkey[0], pkey[1]);
     }
   else if (pkalgo == PUBKEY_ALGO_ECDSA)
@@ -85,7 +83,7 @@ pk_verify (pubkey_algo_t pkalgo, gcry_mpi_t hash,
         rc = gpg_error_from_syserror ();
       else
         {
-          rc = gcry_sexp_build (&s_pkey, NULL,
+          rc = gcry_sexp_build (s_pkey, NULL,
                                 "(public-key(ecdsa(curve %s)(q%m)))",
                                 curve, pkey[1]);
           xfree (curve);
@@ -98,32 +96,108 @@ pk_verify (pubkey_algo_t pkalgo, gcry_mpi_t hash,
         rc = gpg_error_from_syserror ();
       else
         {
-          rc = gcry_sexp_build (&s_pkey, NULL,
+          rc = gcry_sexp_build (s_pkey, NULL,
                                 "(public-key(ecc(curve %s)"
                                 "(flags eddsa)(q%m)))",
                                 curve, pkey[1]);
           xfree (curve);
         }
     }
-  else
-    return GPG_ERR_PUBKEY_ALGO;
+  else {
+    rc = GPG_ERR_PUBKEY_ALGO;
+  }
 
-  if (rc)
-    BUG ();  /* gcry_sexp_build should never fail.  */
+  return rc;
+}
+
+/****************
+ * Patch: blind signature verification
+ *
+ * Extracts the hash related s_exp creation.
+ */
+int
+make_sexp_from_hash(gcry_sexp_t *s_hash, pubkey_algo_t pkalgo,
+                    gcry_mpi_t hash)
+{
+  int rc;
 
   /* Put hash into a S-Exp s_hash. */
   if (pkalgo == PUBKEY_ALGO_EDDSA)
     {
-      if (gcry_sexp_build (&s_hash, NULL,
+      rc = gcry_sexp_build (s_hash, NULL,
                            "(data(flags eddsa)(hash-algo sha512)(value %m))",
-                           hash))
-        BUG (); /* gcry_sexp_build should never fail.  */
+                           hash);
     }
   else
     {
-      if (gcry_sexp_build (&s_hash, NULL, "%m", hash))
-        BUG (); /* gcry_sexp_build should never fail.  */
+      rc = gcry_sexp_build (s_hash, NULL, "%m", hash);
     }
+
+  return rc;
+}
+
+/****************
+ * Patch: blind signature verification
+ *
+ * Custom verification handling for blind signatures.
+ */
+int
+pk_verify_blind (pubkey_algo_t pkalgo, verification_algo_t verification_algo,
+                 gcry_mpi_t hash, gcry_mpi_t *data, gcry_mpi_t *pkey)
+{
+  if (verification_algo == VERIFICATION_ALGO_DEFAULT) {
+    return pk_verify(pkalgo, hash, data, pkey);
+  }
+
+  gcry_sexp_t s_sig;
+  gcry_sexp_t s_hash;
+  gcry_sexp_t s_pkey;
+  int rc;
+
+  if (make_sexp_from_pkey(&s_pkey, pkalgo, pkey))
+    BUG ();  /* gcry_sexp_build should never fail.  */
+
+  if (make_sexp_from_hash(&s_hash, pkalgo, hash))
+    BUG ();  /* gcry_sexp_build should never fail.  */
+
+  if (verification_algo == VERIFICATION_ALGO_BUTUN) {
+    if (!data[0] || !data[1])
+      rc = gpg_error (GPG_ERR_BAD_MPI);
+    else
+      rc = gcry_sexp_build (&s_sig, NULL,
+                            "(sig-val(butun(r%m)(s%m)))", data[0], data[1]);
+  } else {
+    BUG();
+  }
+
+  if (!rc)
+    rc = gcry_pk_verify (s_sig, s_hash, s_pkey);
+
+  gcry_sexp_release (s_sig);
+  gcry_sexp_release (s_hash);
+  gcry_sexp_release (s_pkey);
+  return rc;
+}
+
+
+/****************
+ * Emulate our old PK interface here - sometime in the future we might
+ * change the internal design to directly fit to libgcrypt.
+ */
+int
+pk_verify (pubkey_algo_t pkalgo, gcry_mpi_t hash,
+           gcry_mpi_t *data, gcry_mpi_t *pkey)
+{
+  gcry_sexp_t s_sig;
+  gcry_sexp_t s_hash;
+  gcry_sexp_t s_pkey;
+  int rc;
+
+  if (make_sexp_from_pkey(&s_pkey, pkalgo, pkey))
+    BUG ();  /* gcry_sexp_build should never fail.  */
+
+  if (make_sexp_from_hash(&s_hash, pkalgo, hash))
+    BUG ();  /* gcry_sexp_build should never fail.  */
 
   /* Put data into a S-Exp s_sig. */
   s_sig = NULL;

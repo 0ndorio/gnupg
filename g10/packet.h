@@ -242,6 +242,10 @@ typedef struct
      the digest's value has not been saved here.  */
   byte digest[512 / 8];
   int digest_len;
+
+  /* PATCH: blind signature verification */
+  /* Algorithm used for signature verification */
+  byte verification_algo;
 } PKT_signature;
 
 #define ATTRIB_IMAGE 1

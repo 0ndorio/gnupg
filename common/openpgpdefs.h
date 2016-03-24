@@ -116,6 +116,9 @@ typedef enum
 
     SIGSUBPKT_SIGNATURE     = 32, /* Embedded signature. */
 
+    /* PATCH: blind signature verification */
+    SIGSUBPKT_VERIFICATION   = 100, /* Verification algorithm */
+
     SIGSUBPKT_FLAG_CRITICAL = 128
   }
 sigsubpkttype_t;
@@ -178,6 +181,13 @@ typedef enum
     COMPRESS_ALGO_BZIP2     =  3
   }
 compress_algo_t;
+
+typedef enum
+  {
+    VERIFICATION_ALGO_DEFAULT = 0,
+    VERIFICATION_ALGO_BUTUN   = 1
+  }
+verification_algo_t;
 
 
 #endif /*GNUPG_COMMON_OPENPGPDEFS_H*/

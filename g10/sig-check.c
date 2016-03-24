@@ -464,7 +464,12 @@ check_signature_end_simple (PKT_public_key *pk, PKT_signature *sig,
         return GPG_ERR_GENERAL;
 
     /* Verify the signature.  */
-    rc = pk_verify( pk->pubkey_algo, result, sig->data, pk->pkey );
+    if (sig->verification_algo > 0) {
+      rc = pk_verify_blind( pk->pubkey_algo, sig->verification_algo,
+                            result, sig->data, pk->pkey );
+    } else {
+      rc = pk_verify( pk->pubkey_algo, result, sig->data, pk->pkey );
+    }
     gcry_mpi_release (result);
 
     if( !rc && sig->flags.unknown_critical )

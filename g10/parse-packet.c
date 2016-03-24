@@ -1433,6 +1433,10 @@ dump_sig_subpkt (int hashed, int type, int critical,
                     buffer[0] == 3 ? buffer[15] : buffer[2],
                     buffer[0] == 3 ? buffer[16] : buffer[3]);
       break;
+    case SIGSUBPKT_VERIFICATION:
+      es_fprintf (listfp, "blind signature verification algorithm: %d",
+                  buffer[0]);
+      break;
     default:
       if (type >= 100 && type <= 110)
 	p = "experimental / private subpacket";
@@ -1479,6 +1483,7 @@ parse_one_sig_subpkt (const byte * buffer, size_t n, int type)
     case SIGSUBPKT_EXPORTABLE:
     case SIGSUBPKT_REVOCABLE:
     case SIGSUBPKT_REVOC_REASON:
+    case SIGSUBPKT_VERIFICATION:
       if (!n)
 	break;
       return 0;
@@ -1555,6 +1560,7 @@ can_handle_critical (const byte * buffer, size_t n, int type)
       /* Is it enough to show the policy or keyserver? */
     case SIGSUBPKT_POLICY:
     case SIGSUBPKT_PREF_KS:
+    case SIGSUBPKT_VERIFICATION:
       return 1;
 
     default:
@@ -1949,6 +1955,12 @@ parse_signature (IOBUF inp, int pkttype, unsigned long pktlen,
       p = parse_sig_subpkt2 (sig, SIGSUBPKT_EXPORTABLE);
       if (p && *p == 0)
 	sig->flags.exportable = 0;
+
+      /* PATCH: blind signature verficiation*/
+      p = parse_sig_subpkt(sig->hashed, SIGSUBPKT_VERIFICATION, NULL);
+      if (p) {
+        sig->verification_algo = p[0];
+      }
 
       /* Find all revocation keys.  */
       if (sig->sig_class == 0x1F)
